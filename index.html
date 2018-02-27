@@ -1,0 +1,386 @@
+<!doctype html>
+<html>
+	<head>
+		<title>Cursive Canvas, testing...</title>
+		<meta charset="utf-8" />
+	</head>
+	<body>
+		<canvas id="c" style=' border: 0px solid #9C9898'></canvas>
+		<script>
+			var b = document.body;
+			var c = document.getElementsByTagName('canvas')[0];
+			var a = c.getContext('2d');
+			document.body.clientWidth; // fix bug in webkit: http://qfox.nl/weblog/218
+		</script>
+		<script>
+// start of submission //
+			
+	//Set up the canvas
+	c.width= window.innerWidth *.9      //c.offsetWidth//
+	c.height= window.innerHeight *.9	//c.offsetHeight //window.innerHeight	
+	
+	//Define stroke style
+	a.lineWidth = .2;
+	a.strokeStyle = 'black';
+	a.lineCap = 'butt'
+	
+
+	
+	//constants
+	DRAWING_INCREMENET = .05;
+	ANIMATION_DELAY_MS = 2;
+	LETTER_WIDTH = 20;
+	LETTER_HEIGHT = 40;
+	SCALE = 2;
+	MESSAGE_HEIGHT = c.height/(1.1*SCALE);
+	NULL_FUNCTION = function(){return(true);};
+	
+	//shift to cartesian coords
+	a.translate(20,c.height);
+	a.scale(SCALE,-SCALE);
+	
+	//plotting functions	
+	
+	write_letter = function(letter, origin, stroke){ //returns a function which returns new origin when drawing is complete, else returns false
+		
+		stroke = stroke || 1;
+		delta = 0;
+		draw_curve = false;
+		region = [origin[0], Math.max(0,origin[1]-LETTER_HEIGHT/2), LETTER_WIDTH, LETTER_HEIGHT];
+		completed_strokes = [function(){}];
+		current_stroke_definition_in_absolute_coords = {}
+		
+		//console.debug(region);
+		
+		draw_stroke = function(custom_delta){
+			
+			delta = custom_delta || delta;
+			
+			//1. clear region
+			a.clearRect(region[0],region[1],region[2],region[3]);
+				
+			//2. draw completed curves
+			
+			for (var i = 0; i < completed_strokes.length; i++) {
+				x = completed_strokes[i];
+				x();
+			}
+						
+			//3. draw incomplete curve
+			
+			if (delta == 0 || current_stroke_definition_in_absolute_coords.length==0) //get the next stroke
+			{
+				if('phantomStrokes' in letter){
+					while(letter.phantomStrokes.indexOf(stroke) !== -1) { //sometimes we lift our pen
+						stroke = stroke+1;
+						if (stroke > letter.points.length-1){ //final stroke was a phantom
+							return([origin[0] + letter.points[letter.points.length-1][0],origin[1]]); //new orgin has same Y coord, new X coord
+						}
+					}
+				}
+				
+				
+				from =  letter.points[stroke-1];
+				to = letter.points[stroke];
+				ctrl1 = letter.controls[2*stroke -2];
+				ctrl2 = letter.controls[2*stroke -1];
+				
+				current_stroke_definition_in_absolute_coords = { 
+					"from": [origin[0] + from[0],  origin[1] + from[1]],
+					"to": [origin[0] + to[0],  origin[1] + to[1]],
+					"ctrl1": [origin[0] + ctrl1[0],  origin[1] + ctrl1[1]],
+					"ctrl2": [origin[0] + ctrl2[0],  origin[1] + ctrl2[1]]
+				}
+
+				draw_curve = current_curve(current_stroke_definition_in_absolute_coords);
+			}
+			
+			draw_curve(delta); //Draw something  --- should actually add the origin when initialising the closure instead of here, for efficiency.
+			
+			if (delta >= 1){ //we've reached the end of the stroke
+				delta = 0; 
+				stroke = stroke+1;
+				if(stroke > letter.points.length-1){ //we're done drawing
+					return([origin[0] + letter.points[letter.points.length-1][0],origin[1]]); //new orgin has same Y coord, new X coord
+				} else { //add this stroke to the completed array}
+					completed_strokes[completed_strokes.length] = complete_stroke(current_stroke_definition_in_absolute_coords)
+				}
+			} else {
+				//console.debug([delta]);
+				delta = delta + DRAWING_INCREMENET;
+			}
+
+			return(false);
+		}
+		
+		
+		return( draw_stroke   );
+	}
+
+	complete_stroke = function(stroke_definition){
+
+			draw_complete_stroke = function()
+			{
+				a.beginPath();
+				a.moveTo( stroke_definition.from[0], stroke_definition.from[1]);	
+				a.bezierCurveTo(stroke_definition.ctrl1[0], stroke_definition.ctrl1[1],stroke_definition.ctrl2[0],stroke_definition.ctrl2[1], stroke_definition.to[0],stroke_definition.to[1]);		
+				a.stroke();
+			}
+			
+			return(draw_complete_stroke);
+	}
+	
+	current_curve = function(def){
+		
+		
+		slope1 = [def.ctrl1[0] - def.from[0] , def.ctrl1[1] - def.from[1]];
+		slope2 = [def.ctrl2[0] - def.ctrl1[0] , def.ctrl2[1] - def.ctrl1[1]];
+		slope3 = [def.to[0] - def.ctrl2[0] , def.to[1] - def.ctrl2[1]];
+		
+		draw_curve = function(delta){
+			
+			
+			Q0 = [def.from[0] + slope1[0]*delta,def.from[1] + slope1[1]*delta]
+			Q1 = [def.ctrl1[0] + slope2[0]*delta,def.ctrl1[1] + slope2[1]*delta]
+			Q2 = [def.ctrl2[0] + slope3[0]*delta,def.ctrl2[1] + slope3[1]*delta]
+			
+			R0 = [Q0[0] + (Q1[0]-Q0[0])*delta, Q0[1] + (Q1[1]-Q0[1])*delta]
+			R1 = [Q1[0] + (Q2[0]-Q1[0])*delta, Q1[1] + (Q2[1]-Q1[1])*delta]
+			
+			B = [R0[0] + (R1[0]-R0[0])*delta, R0[1] + (R1[1]-R0[1])*delta]
+			
+			delta_c1 = Q0
+			delta_c2 = Q1
+			delta_to = B
+			
+			a.beginPath();
+			a.moveTo(def.from[0], def.from[1]);	
+			//a.quadraticCurveTo(delta_c1[0],delta_c1[1],delta_to[0],delta_to[1]);		
+			
+			a.bezierCurveTo(delta_c1[0],delta_c1[1],delta_c2[0],delta_c2[1],delta_to[0],delta_to[1]);		
+			
+			
+			a.stroke();
+	
+		}
+		return(draw_curve)
+	}
+	
+	
+	clear_all = function(){
+		a.clearRect(0,0,c.width,c.height);
+					origin =  [0,MESSAGE_HEIGHT];
+	}
+
+	//letters
+	letters = {
+		"a": { 
+			"points":[[0,0] ,[18,7], [6,1],[18,7],[20,0]], 
+			"controls": [[7,1] ,[15,15], [19,8], [6,-4], [6,2], [15,15], [14,-2], [16,0]]
+			},
+		"b": { 
+			"points":[[0,0] ,[15,18], [4,-1],[15,5],[7,0],[20,0]], 
+			"controls": [[5,0] ,[16,16], [15,15], [7,-2], [5,-3], [15,12], [14,-4], [5,-2], [7,1], [12,-1]]
+			},
+		"c": { 
+			"points":[[0,0] ,[15,8],[18,0]], 
+			"controls": [[6,0] ,[12,12], [12,12], [0,-4]]
+			},
+		"d": { 
+			"points":[[0,0] ,[15,8], [12,2],[21,18],[20,0]], 
+			"controls": [[6,0] ,[11,11], [10,12], [-1,-9], [15,5], [18,13], [6,-2], [12,-1]]
+			},
+		"e": { 
+			"points":[[0,0] ,[13,9], [20,0]], 
+			"controls": [[20,7] ,[17,10], [5,7], [2,-3]]
+			},
+		"f": { 
+			"points":[[0,0] ,[15,16], [8,-6],[16,0]], 
+			"controls": [[6,2] ,[18,16], [10,16], [10,-8], [8,14], [11,-1]]
+			},
+		"g": { 
+			"points":[[0,0] ,[15,7], [15,7], [0,-7], [17,0]], 
+			"controls": [[3,0] ,[12,10], [5,9], [0,-12], [15,-5], [0,-14], [0,-5], [12,-4]]
+			},
+		"h": { 
+			"points":[[0,0] ,[20,18], [4,0], [14,7], [20,0]], 
+			"controls": [[3,0] ,[17,21], [19,16], [8,13], [14,12], [14,8], [8,-3], [19,0]]
+			},
+		"i": { 
+			"points":[[0,0] ,[9,7], [11,0], [10,9], [10,9], [11,0]], 
+			"controls": [[3,0] ,[8,10], [8,10], [2,-4],[null,null],[null,null],[8,9],[11,7],[null,null],[0,0]],
+			'phantomStrokes': [3,5] 
+			},
+		"j": { 
+			"points":[[0,0] ,[9,7], [0,-7], [11,0], [10,9], [10,9], [11,0]], 
+			"controls": [[3,0] ,[8,10], [8,10], [3,-10],[0,-4],[6,0],[null,null],[null,null],[8,9],[11,7],[null,null],[null,null]],
+			'phantomStrokes': [4,6] 
+			},
+		"k": { 
+			"points":[[0,0] ,[16,17], [3,-2], [14,7], [4,2], [16,0]], 
+			"controls": [[4,-1] ,[15,20], [16,16], [3,-3], [0,0], [14,13], [14,3], [6,1], [8,8],[13,-2]]
+			},
+		"l": { 
+			"points":[[0,0] ,[14,16], [15,0]], 
+			"controls": [[4,0] ,[15,17], [13,17], [-4,-6]]
+			},
+		"m": { 
+			"points":[[0,0] ,[8,8], [2,-1], [10,-1], [15,-1], [20,0]], 
+			"controls": [[4,0] ,[8,7],[8,7],[5,0],[10,8],[17,14],[12,9],[25,13],[13,-2], [17,-1]]
+			},
+		"n": { 
+			"points":[[0,0] ,[8,8], [2,-1], [10,-1], [15,0]], 
+			"controls": [[4,0] ,[8,7],[8,7],[5,0],[10,8],[17,14],[8,-2], [12,-1]]
+			},			
+		"o": { 
+			"points":[[0,0] ,[13,7], [6,0],[13,7],[15,7] ], 
+			"controls": [[4,0] ,[9,9],[15,6],[12,-3],[4,1],[9,9],[9,8],[13,6]],
+			//"controls": [[4,0] ,[9,9],[15,6],[12,-3],[4,1],[9,9],[9,8],[13,6],[null,null],[null,null],[16,2],[15,-1]],
+			//'phantomStrokes': [5] 
+			},
+		"p": { 
+			"points":[[0,0] ,[1,-9],[12,7], [13,0]], 
+			"controls": [[8,20] ,[3,-4], [0,-5], [8,9], [13,3], [7,-2]]
+			},
+		"q": { 
+			"points":[[0,0] ,[15,7], [15,7], [13,-9], [17,0]], 
+			"controls": [[3,0] ,[12,10], [3,8], [8,-9], [15,-5], [14,-9], [10,-7], [12,-2]]
+			},
+		"r": { 
+			"points":[[0,0] ,[8,0], [14,8]], 
+			"controls": [[3,0] ,[14,17], [10,4], [8,9]],
+			//"controls": [[3,0] ,[14,17], [10,4], [8,9], [null,null],[null,null],[15,2],[14,-1]],
+			//'phantomStrokes': [3] 
+			},
+		"s": { 
+			"points":[[0,0] ,[15,9], [1,1],[16,0]], 
+			"controls": [[5,-2] ,[10,12], [10,12], [7,-7], [0,3], [10,0]]
+			},
+		"t": { 
+			"points":[[0,0] ,[14,16], [15,0],[3,10],[15,12],[15,0]], 
+			"controls": [[4,0] ,[15,17], [13,17], [-4,-6], [null,null],[null,null], [5,12],[16,10]],
+			'phantomStrokes': [3,5] 
+			},
+		"u": { 
+			"points":[[0,0] ,[8,8], [14,8], [14,0]], 
+			"controls": [[4,0] ,[9,6], [1,-5], [10,-2], [9,-4], [12,0]]
+			},
+		"v": { 
+			"points":[[0,0] ,[8,8], [14,8]], 
+			"controls": [[4,0] ,[9,6], [13,-4], [7,-1]],
+			//"controls": [[4,0] ,[9,6], [13,-4], [7,-1], [null,null],[null,null], [15,3], [14,0]],
+			//'phantomStrokes': [3] 
+			},
+		"w": { 
+			"points":[[0,0] ,[8,7], [11,7], [15,7]], 
+			"controls": [[4,0] ,[9,6], [1,-5], [12,0],[7,-3],[12,-2]]
+			},
+		"x": { 
+			"points":[[0,0] ,[13,8], [6,7],[14,0]], 
+			"controls": [[4,0] ,[14,9],  [null,null],[null,null], [6,8], [11,-1]],
+			'phantomStrokes': [2] 
+			},
+		"y": { 
+			"points":[[0,0] ,[8,8], [14,8], [14,0]], 
+			"controls": [[4,0] ,[9,6], [1,-5], [10,-2], [-7,-28], [4,0]]
+			},
+		"z": { 
+			"points":[[0,0] ,[15,9], [15,0]], 
+			"controls": [[7,0] ,[-1,11], [1,-4], [3,1]]
+			}
+			
+		};
+	
+	
+	//temp
+
+	message = "* hello?   * @  is anyone there * @  it is so dark in here ** @  ok enough of that * @ now you type things and press escape to clear the screen "
+	
+
+	//letters_to_render = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"	
+	letters_to_render = message
+
+	//initialise vars
+	origin =  [0,MESSAGE_HEIGHT];
+	completed_writing = true;
+	
+	
+	//animation loop
+	pause_timer=0
+	
+	animation = function(){
+		
+		if(pause_timer > 0){
+			pause_timer--;
+			return(true);
+		}
+		
+		if(completed_writing != false){
+			if(completed_writing.length == 2) { //we've just finished a letter and have moved along the page horizontally
+				origin = completed_writing;				
+				completed_writing = true;
+			}
+			
+			if (origin[0]*SCALE > c.width * .9){ //newline
+				origin[0] = 0;
+				//console.debug('newline');
+				origin[1] = origin[1] - LETTER_HEIGHT;
+			}
+			
+			if(letters_to_render.length > 0){	
+				candidate_letter = letters_to_render[0]
+				
+				switch(candidate_letter)
+				{
+				case '@': //clear the message
+					clear_all();
+					draw = NULL_FUNCTION;
+					break;
+				case '*': //one second pause
+					pause_timer = 1000/ANIMATION_DELAY_MS
+					draw = NULL_FUNCTION;
+					break;
+				case ' ':
+					origin[0] = origin[0] + LETTER_WIDTH/3;
+					draw = NULL_FUNCTION;
+					break;
+				default:
+					if(candidate_letter in letters){
+						current_letter = letters[candidate_letter];
+						draw = write_letter(current_letter, origin);
+					} else {draw = NULL_FUNCTION;}
+				}
+				
+
+				letters_to_render = letters_to_render.slice(1,letters_to_render.length);
+			} else {draw = NULL_FUNCTION;}
+		}
+		completed_writing = draw();
+		
+	}
+
+
+
+	//capture keyboard events
+	
+	b.addEventListener( "keydown", write_user_input, true); 
+	
+	
+	function write_user_input(e){
+			
+			if (e.keyCode == 27){//Clear it when they hit escape...
+				clear_all();
+				letters_to_render = ''
+			}else{
+				letters_to_render = letters_to_render + String.fromCharCode(e.keyCode).toLowerCase();
+			}
+	};
+	
+	setInterval(animation, ANIMATION_DELAY_MS);
+	
+
+
+// end of submission //
+		</script>
+	</body>
+</html>
